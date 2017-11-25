@@ -1,6 +1,5 @@
 import wnck
 import time
-from pymouse import PyMouse
 
 import pyscreenshot as ImageGrab
 import cv2
