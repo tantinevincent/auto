@@ -7,12 +7,15 @@ import numpy as np
 import logging
 
 import pyautogui
+import random
 
 logging.basicConfig(level=logging.INFO,
                     format='[%(asctime)s][%(levelname)-5s] %(message)s',
                     datefmt="%Y-%m-%d %H:%M:%S")
 
 logger = logging.getLogger('kancolle-auto')
+
+window = None
 
 def get_window(name):
     name = name.lower()
@@ -40,6 +43,14 @@ def load_template(template_path):
     w, h = template.shape[::-1]
     return template, w, h
 
+def load_template_2(template_path):
+    logger.info("loading template %s",  template_path)
+    template = cv2.imread(template_path, 0)
+    return template
+
+def get_size(template):
+    return template.shape[::-1]
+
 def match(window, template, threshold):
     # capture window
     x, y, w, h = window.get_client_window_geometry()
@@ -59,37 +70,85 @@ def match(window, template, threshold):
     else:
         return None
 
+def match_2(window, template, threshold):
+    # capture window
+    x, y, w, h = window.get_client_window_geometry()
+    im = ImageGrab.grab(bbox=(x, y, x+w, y+h), backend='scrot')
+    im = np.array(im.convert('RGB'))
+    # to grayscale image array
+    cv_img = im.astype(np.uint8)
+    cv_gray = cv2.cvtColor(cv_img, cv2.COLOR_RGB2GRAY)
+    # find template in window
+    res = cv2.matchTemplate(cv_gray, template, cv2.TM_CCOEFF_NORMED)
+    locs = np.where(res >= threshold)
+    # get template size
+    t_w, t_h = get_size(template)
+    # put midpoint of found template in list
+    founds = [] 
+    for l in zip(*locs[::-1]):
+        found = (x + l[0] + int(t_w/2),  y + l[1] + int(t_h/2))
+        founds.append(found) 
+
+    return founds
+
 def normal_rand(mean, size):
+    if size == 0:
+        return mean
+
     half_size = int(size/2)
     sigma = int(half_size/4) # diveded by 4 for make sure all value in size (devided by 3 with 99.7%)
 
     value = np.random.normal(mean, sigma)
-    return value
+    return int(value)
 
-def find(template_path, sleep_time=2, threshold=0.80):
+def gauss_rand(mean, size):
+    if size == 0:
+        return mean
+
+    half_size = int(size/2)
+    sigma = int(half_size/4) # diveded by 4 for make sure all value in size (devided by 3 with 99.7%)
+
+    value = np.random.normal(mean, sigma)
+    return int(value)
+
+def is_exists(template_path, sleep_time=2, threshold=0.80):
     logger.info('find %s', template_path)
     template, _, _ = load_template(template_path)
     result = match(window, template, threshold)
     return result is not None
 
-def click(template_path, sleep_time=2, offset=None, threshold=0.80):
+def find_all(template_path, threshold=0.95):
+    logger.info('find all of %s', template_path)
+    template = load_template_2(template_path)
+    result = match_2(window, template, threshold)
+    return result
 
-    logger.info('click %s', template_path)
-    template, w, h = load_template(template_path)
-    result = match(window, template, threshold)
+def click(target, sleep_time=2, offset=(0,0), threshold=0.80, fake=False):
 
-    if result is None:
-        raise Exception('Not found %s' % template_path)
-
-    x, y = result
-    if offset is not None:
-        x = result[0] + offset[0]
-        y = result[1] + offset[1]
+    if isinstance(target, tuple):
+        x, y = target
     else:
-        x = normal_rand(result[0] + int(w/2), w)
-        y = normal_rand(result[1] + int(h/2), h)
+        template = load_template_2(target)
+        founds = match_2(window, template, threshold)
 
-    pyautogui.click(x, y, duration=0.2, tween=pyautogui.easeInOutQuad)
+        if not founds:
+            raise Exception('Not found %s' % target)
+
+        x, y = founds[0]
+        w, h = get_size(template)
+        x = gauss_rand(x, w) if offset == (0,0) else x
+        y = gauss_rand(y, h) if offset == (0,0) else y
+
+    x += offset[0] + random.randrange(-5, 5)
+    y += offset[1] + random.randrange(-5, 5)
+
+    logger.info('click (%s,%s)', x, y)
+    
+    if fake:
+        pyautogui.moveTo(x, y, duration=0.2, tween=pyautogui.easeInOutQuad)
+    else:
+        pyautogui.click(x, y, duration=0.2, tween=pyautogui.easeInOutQuad)
+
     time.sleep(sleep_time)
 
 def click_if_exists(template_path, sleep_time=2, offset=None, threshold=0.80):
@@ -151,6 +210,7 @@ def wait(template_paths, timeout=10, threshold=0.80):
 
 def levelup():
     # before combat
+    
     click('operation.png')
     click('sortie.png')
     click('world_3.png')
@@ -160,7 +220,7 @@ def levelup():
     wait('compass.png')
     click('compass.png')
     wait("formation.png")
-    click('formation.png', offset=(50,120))
+    click('formation.png', offset=(-130,-30))
     # after combat
     templates = ['next.png', 'leave_combat.png']
     found = wait(templates, timeout=120)
@@ -180,13 +240,46 @@ def levelup():
  
 def repair():
     click('docking.png')
-    click('docker.png', offset=(125,50))
+    dockers = find_all('docker.png', threshold=0.95)
+    logger.info('docker is left %s', len(dockers))
+
+    # repair fleet 1
+    for docker in dockers:
+        click(docker)
+        result = find_all('1.png')
+        for pos in result:
+            click(pos)
+            click('start_repair.png')
+            if not is_exists('yes_or_no.png'):
+                click(docker)
+            else:
+                click('yes_or_no.png', offset=(100,0))
+                break
+
+        click(docker)
+
+    # docker 2
+    #click('dockers.png', offset=(-210,-30), fake=True)
+    '''
+    for dockers in docker
+
+    result = find_all('1.png')
+    for pos in result:
+        click(pos)
+        click('start_repair.png')
+        if not is_exists('yes.png'):
+            click(pos)
+        else:
+            click('yes.png')
+
+    for pos in result:
     for damage in ['heavy_damage.png','moderate_damage.png', 'minor_damage.png']:
         found = click_if_exists(damage)
         if not found:
             continue
         click('start_repair.png')
         click('yes.png')
+    '''
     click('goback.png')
     goaway()
 
@@ -194,7 +287,7 @@ def resupply(check_list=[1,2,3,4]):
     click('resupply.png', sleep_time=3)
     for i in check_list:
         click('resupply_%s.png' % i)
-        click_if_exists('select_bar.png', offset=(10,10))
+        click_if_exists('select_bar.png', offset=(0,-150))
 
     click('goback.png')
     goaway()
@@ -214,8 +307,8 @@ def check_expedition_back():
 def expedition():
     expeditions = [6,21,38]
 
-    #click('operation.png')    
-    #click('expedition.png')
+    click('operation.png')    
+    click('expedition.png')
 
     for i in xrange(3):
         fleet_num = i + 2
@@ -223,7 +316,7 @@ def expedition():
         world_num = expedition_num / 8 + 1
         click('expedition/world_%s.png' % world_num, sleep_time=3)
         click('expedition/expedition_%s.png' % expedition_num)
-        if find('stop_expedition.png'):
+        if is_exists('stop_expedition.png'):
             continue
         click('confirm.png')
         if fleet_num != 2:
