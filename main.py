@@ -113,9 +113,9 @@ def gauss_rand(mean, size):
 
 def is_exists(template_path, sleep_time=2, threshold=0.80):
     logger.info('find %s', template_path)
-    template, _, _ = load_template(template_path)
-    result = match(window, template, threshold)
-    return result is not None
+    template = load_template_2(template_path)
+    result = match_2(window, template, threshold=threshold)
+    return len(result) != 0
 
 def find_all(template_path, threshold=0.95):
     logger.info('find all of %s', template_path)
@@ -326,6 +326,21 @@ def expedition():
 
     click('goback.png')
 
+def check_quest():
+    click('quest.png')
+    click('oyodo.png')
+    click('quest_tags.png', offset=(0,-50))
+    click('leave_quest.png')
+
+def check_combat_ready():
+    click('resupply.png', sleep_time=3)
+    click_if_exists('select_bar.png', offset=(0,-150))
+    is_repairing = is_exists('repairing.png')
+
+    click('goback.png')
+    goaway()
+    return not is_repairing
+    
 if __name__ == '__main__':
     
     #click('base.png') 
@@ -336,13 +351,21 @@ if __name__ == '__main__':
     window = get_window('poi')
     activate_window(window)
 
-    click_if_exists('goback.png')
-    goaway()
-    #resupply(check_list=[1])
-    levelup()
+    #click_if_exists('goback.png')
+    #goaway()
+
+    check_quest()
     check_expedition_back()
-    repair()
+
+    is_ready = check_combat_ready()
+    logger.info('ready to combat: %s', is_ready)
     check_expedition_back()
+
+    if is_ready:
+        levelup()
+        check_expedition_back()
+        repair()
+        check_expedition_back()
+
     resupply()
     #expedition()
- 
