@@ -9,6 +9,8 @@ import logging
 import pyautogui
 import random
 
+import ConfigParser
+
 logging.basicConfig(level=logging.INFO,
                     format='[%(asctime)s][%(levelname)-5s] %(message)s',
                     datefmt="%Y-%m-%d %H:%M:%S")
@@ -117,7 +119,13 @@ def is_exists(template_path, sleep_time=2, threshold=0.80):
     result = match_2(window, template, threshold=threshold)
     return len(result) != 0
 
-def find_all(template_path, threshold=0.95):
+def find(template_path, threshold=0.80):
+    logger.info('find all of %s', template_path)
+    template = load_template_2(template_path)
+    result = match_2(window, template, threshold)
+    return None if len(result) == 0 else result[0]
+
+def find_all(template_path, threshold=0.80):
     logger.info('find all of %s', template_path)
     template = load_template_2(template_path)
     result = match_2(window, template, threshold)
@@ -159,24 +167,6 @@ def click_if_exists(template_path, sleep_time=2, offset=None, threshold=0.80):
         logger.info("not found %s, but it's ok", template_path)
         time.sleep(sleep_time)
         return False
-
-def moveTo(template_path, sleep_time=2, offset=None, threshold=0.80):
-    template, w, h = load_template(template_path)
-    result = match(window, template, threshold)
-
-    if result is None:
-        raise Exception('Not found %s' % template_path)
-
-    x, y = result
-    if offset is not None:
-        x = result[0] + offset[0]
-        y = result[1] + offset[1]
-    else:
-        x = normal_rand(result[0] + int(w/2), w)
-        y = normal_rand(result[1] + int(h/2), h)
-
-    pyautogui.moveTo(x, y, duration=0.2, tween=pyautogui.easeInOutQuad)
-    time.sleep(sleep_time)
 
 def goaway():
     x, y = pyautogui.size()
@@ -293,29 +283,34 @@ def resupply(check_list=[1,2,3,4]):
     goaway()
 
 def check_expedition_back():
-    result = wait('expedition_back.png', timeout=5)
-    if result == -1:
-        return False
-   
-    click('expedition_back.png')
-    wait('next.png')
-    click('next.png')
-    wait('next.png')
-    click('next.png')
-    return True
 
-def expedition():
-    expeditions = [6,21,38]
+    is_back = False
+
+    while True:
+        result = wait('expedition_back.png', timeout=5)
+        if result == -1:
+            break
+
+        is_back = True
+        click('expedition_back.png')
+        wait('next.png')
+        click('next.png')
+        wait('next.png')
+        click('next.png')
+
+    return is_back
+
+def expedition(nums):
 
     click('operation.png')    
     click('expedition.png')
 
     for i in xrange(3):
         fleet_num = i + 2
-        expedition_num = expeditions[i]
+        expedition_num = nums[i]
         world_num = expedition_num / 8 + 1
         click('expedition/world_%s.png' % world_num, sleep_time=3)
-        click('expedition/expedition_%s.png' % expedition_num)
+        click('expedition/expedition_%s.png' % expedition_num, threshold=0.90)
         if is_exists('stop_expedition.png'):
             continue
         click('confirm.png')
@@ -323,6 +318,7 @@ def expedition():
             click('resupply_%s.png' % fleet_num )
         click('start_expedition.png')
         wait('stop_expedition.png')
+        time.sleep(5)
 
     click('goback.png')
 
@@ -330,6 +326,17 @@ def check_quest():
     click('quest.png')
     click('oyodo.png')
     click('quest_tags.png', offset=(0,-50))
+    while True:
+        done = find('done.png')
+        if done is None:
+            break
+        click(done)
+        while True:
+            close = find('close.png')
+            if close is None:
+                break
+            click(close)
+
     click('leave_quest.png')
 
 def check_combat_ready():
@@ -343,29 +350,40 @@ def check_combat_ready():
     
 if __name__ == '__main__':
     
-    #click('base.png') 
+    config = ConfigParser.RawConfigParser()
+    config.read('config.ini')
+    expedution_nums = [int(config.get('expedition', str(x))) for x in range(2,4+1)]
 
-    #if is_exists('base.png'):
-    #    print 'exists'
-    #    click('base.png') 
+    wait_base = int(config.get('wait_time', 'base'))
+    wait_offset = int(config.get('wait_time', 'offset'))
+
     window = get_window('poi')
     activate_window(window)
 
-    #click_if_exists('goback.png')
-    #goaway()
-
-    check_quest()
-    check_expedition_back()
-
-    is_ready = check_combat_ready()
-    logger.info('ready to combat: %s', is_ready)
-    check_expedition_back()
-
-    if is_ready:
-        levelup()
-        check_expedition_back()
-        repair()
+    while True:
+        #click_if_exists('goback.png')
+        goaway()
         check_expedition_back()
 
-    resupply()
-    #expedition()
+        check_quest()
+        check_expedition_back()
+        is_ready = check_combat_ready()
+        logger.info('ready to combat: %s', is_ready)
+        check_expedition_back()
+
+        if is_ready:
+            levelup()
+            check_expedition_back()
+            repair()
+            check_expedition_back()
+
+        while True:
+            resupply()
+            is_back = check_expedition_back()
+            if not is_back:
+                break
+
+        expedition(expedution_nums)
+        wait_time = wait_base + random.randrange(wait_offset)
+        logger.info('wait %s seconds...', wait_time)
+        time.sleep(wait_time)
